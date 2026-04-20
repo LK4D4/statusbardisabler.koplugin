@@ -61,7 +61,7 @@ Notes:
 
 ### AppStore
 
-Install through the App Store plugin for KOReader.
+Install through the [KOReader AppStore plugin](https://github.com/omer-faruq/appstore.koplugin).
 
 ### Manual
 
