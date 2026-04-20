@@ -1,0 +1,47 @@
+name: Release Package
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Build plugin ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist/statusbardisabler.koplugin
+
+          shopt -s dotglob nullglob
+          for entry in *; do
+            case "$entry" in
+              .git|.github|tests|dist|.gitignore)
+                continue
+                ;;
+            esac
+            cp -R "$entry" dist/statusbardisabler.koplugin/
+          done
+
+          (
+            cd dist
+            zip -r ../statusbardisabler.koplugin.zip statusbardisabler.koplugin
+          )
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: statusbardisabler.koplugin.zip
+          overwrite_files: true
