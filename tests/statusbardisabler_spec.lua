@@ -13,6 +13,7 @@ local function assertTrue(value, message)
 end
 
 local persisted_settings
+local persisted_runtime_state
 local shown_widgets = {}
 local closed_widgets = {}
 
@@ -74,11 +75,16 @@ _G.G_reader_settings = {
         if key == "statusbardisabler" then
             return persisted_settings or default
         end
+        if key == "statusbardisabler_runtime" then
+            return persisted_runtime_state or default
+        end
         return default
     end,
     saveSetting = function(_, key, value)
         if key == "statusbardisabler" then
             persisted_settings = value
+        elseif key == "statusbardisabler_runtime" then
+            persisted_runtime_state = value
         end
     end,
 }
@@ -91,11 +97,22 @@ local function newPlugin(settings, state)
     closed_widgets = {}
 
     local footer = {
-        toggle_calls = 0,
+        apply_mode_calls = {},
+        mode = state.footer_mode or 1,
     }
 
-    function footer:onToggleFooterMode()
-        self.toggle_calls = self.toggle_calls + 1
+    function footer:applyFooterMode(mode)
+        table.insert(self.apply_mode_calls, mode)
+        self.mode = mode
+        if self.view then
+            self.view.footer_visible = mode ~= 0
+        end
+    end
+
+    function footer:onUpdateFooter(visible)
+        if visible ~= nil then
+            self.last_update_visible = visible
+        end
     end
 
     local plugin = setmetatable({
@@ -103,6 +120,9 @@ local function newPlugin(settings, state)
             menu = {
                 registerToMainMenu = function() end,
             },
+            handleEvent = function(_, event)
+                footer.last_event = event
+            end,
             document = {
                 file = state.file,
             },
@@ -111,10 +131,16 @@ local function newPlugin(settings, state)
                 footer = footer,
             },
         },
-        state = {
-            hidden_by_plugin = state.hidden_by_plugin or false,
-        },
     }, { __index = StatusBarDisabler })
+
+    if state.hidden_by_plugin ~= nil or state.previous_footer_mode ~= nil then
+        plugin.state = {
+            hidden_by_plugin = state.hidden_by_plugin == true,
+            previous_footer_mode = state.previous_footer_mode,
+        }
+    end
+
+    footer.view = plugin.ui.view
 
     plugin:init()
     return plugin
@@ -130,8 +156,11 @@ local matching_plugin = newPlugin({
 
 matching_plugin:onReaderReady()
 
-assertEquals(matching_plugin.ui.view.footer.toggle_calls, 1, "matching path should toggle visible footer off")
+assertEquals(#matching_plugin.ui.view.footer.apply_mode_calls, 1, "matching path should apply a footer mode change")
+assertEquals(matching_plugin.ui.view.footer.apply_mode_calls[1], 0, "matching path should force footer mode off")
+assertEquals(matching_plugin.ui.view.footer.last_update_visible, true, "matching path should request footer update after mode change")
 assertTrue(matching_plugin.state.hidden_by_plugin, "plugin should remember that it hid the footer")
+assertEquals(matching_plugin.state.previous_footer_mode, 1, "plugin should remember the previously visible footer mode")
 
 local restore_plugin = newPlugin({
     enabled = true,
@@ -140,12 +169,16 @@ local restore_plugin = newPlugin({
     file = "/books/Novel/book.epub",
     footer_visible = false,
     hidden_by_plugin = true,
+    previous_footer_mode = 3,
+    footer_mode = 0,
 })
 
 restore_plugin:onReaderReady()
 
-assertEquals(restore_plugin.ui.view.footer.toggle_calls, 1, "non-matching path should restore footer only when plugin hid it")
+assertEquals(#restore_plugin.ui.view.footer.apply_mode_calls, 1, "non-matching path should restore footer only when plugin hid it")
+assertEquals(restore_plugin.ui.view.footer.apply_mode_calls[1], 3, "non-matching path should restore previous footer mode")
 assertTrue(not restore_plugin.state.hidden_by_plugin, "restore should clear plugin-owned hidden flag")
+assertEquals(restore_plugin.state.previous_footer_mode, nil, "restore should clear the remembered previous footer mode")
 
 local user_hidden_plugin = newPlugin({
     enabled = true,
@@ -158,7 +191,7 @@ local user_hidden_plugin = newPlugin({
 
 user_hidden_plugin:onReaderReady()
 
-assertEquals(user_hidden_plugin.ui.view.footer.toggle_calls, 0, "plugin must not force footer on when user hid it")
+assertEquals(#user_hidden_plugin.ui.view.footer.apply_mode_calls, 0, "plugin must not force footer on when user hid it")
 
 local settings_plugin = newPlugin({
     enabled = true,
@@ -187,7 +220,7 @@ local disabled_plugin = newPlugin({
 })
 
 disabled_plugin:onReaderReady()
-assertEquals(disabled_plugin.ui.view.footer.toggle_calls, 0, "disabled plugin should not change footer visibility")
+assertEquals(#disabled_plugin.ui.view.footer.apply_mode_calls, 0, "disabled plugin should not change footer visibility")
 
 local menu_items = {}
 matching_plugin:addToMainMenu(menu_items)
@@ -206,9 +239,12 @@ local transition_plugin = newPlugin({
 transition_plugin:onReaderReady()
 transition_plugin.ui.document.file = "/books/Novel/B.epub"
 transition_plugin.ui.view.footer_visible = false
+transition_plugin.ui.view.footer.mode = 0
 transition_plugin:onReaderReady()
 
-assertEquals(transition_plugin.ui.view.footer.toggle_calls, 2, "moving from matching to non-matching books should restore footer once")
+assertEquals(#transition_plugin.ui.view.footer.apply_mode_calls, 2, "moving from matching to non-matching books should restore footer once")
+assertEquals(transition_plugin.ui.view.footer.apply_mode_calls[1], 0, "first transition call should disable the footer")
+assertEquals(transition_plugin.ui.view.footer.apply_mode_calls[2], 1, "second transition call should restore the previous footer mode")
 
 local dialog_plugin = newPlugin({
     enabled = true,
@@ -250,5 +286,30 @@ local dedupe_plugin = newPlugin({
 assertEquals(#dedupe_plugin.settings.path_fragments, 2, "plugin should normalize duplicate saved fragments on init")
 assertEquals(dedupe_plugin.settings.path_fragments[1], "Manga", "dedupe should preserve the first fragment")
 assertEquals(dedupe_plugin.settings.path_fragments[2], "Comics", "dedupe should preserve order for unique fragments")
+
+local first_session_plugin = newPlugin({
+    enabled = true,
+    path_fragments = { "Manga" },
+}, {
+    file = "/books/Manga/Session.cbz",
+    footer_visible = true,
+    footer_mode = 4,
+})
+
+first_session_plugin:onReaderReady()
+
+local second_session_plugin = newPlugin({
+    enabled = true,
+    path_fragments = { "Manga" },
+}, {
+    file = "/books/Novel/Session.epub",
+    footer_visible = false,
+    footer_mode = 0,
+})
+
+second_session_plugin:onReaderReady()
+
+assertEquals(#second_session_plugin.ui.view.footer.apply_mode_calls, 1, "restoring on another book should work across plugin instances")
+assertEquals(second_session_plugin.ui.view.footer.apply_mode_calls[1], 4, "cross-instance restore should use the previously remembered visible mode")
 
 print("statusbardisabler smoke tests passed")

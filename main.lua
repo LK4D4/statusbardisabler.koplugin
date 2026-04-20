@@ -14,6 +14,11 @@ local DEFAULT_SETTINGS = {
     path_fragments = {},
 }
 
+local DEFAULT_RUNTIME_STATE = {
+    hidden_by_plugin = false,
+    previous_footer_mode = nil,
+}
+
 local function trim(text)
     return text:gsub("^%s+", ""):gsub("%s+$", "")
 end
@@ -58,12 +63,22 @@ end
 
 function StatusBarDisabler:init()
     self.settings = self:normalizeSettings(G_reader_settings:readSetting("statusbardisabler", DEFAULT_SETTINGS))
-    self.state = self.state or { hidden_by_plugin = false }
+    self.state = self.state or G_reader_settings:readSetting("statusbardisabler_runtime", DEFAULT_RUNTIME_STATE) or {}
+    if self.state.hidden_by_plugin == nil then
+        self.state.hidden_by_plugin = false
+    end
     self.ui.menu:registerToMainMenu(self)
 end
 
 function StatusBarDisabler:persistSettings()
     G_reader_settings:saveSetting("statusbardisabler", self.settings)
+end
+
+function StatusBarDisabler:persistRuntimeState()
+    G_reader_settings:saveSetting("statusbardisabler_runtime", {
+        hidden_by_plugin = self.state.hidden_by_plugin == true,
+        previous_footer_mode = self.state.previous_footer_mode,
+    })
 end
 
 function StatusBarDisabler:pathMatches(file_path)
@@ -88,11 +103,26 @@ function StatusBarDisabler:isFooterVisible()
     return self.ui and self.ui.view and self.ui.view.footer_visible == true
 end
 
-function StatusBarDisabler:toggleFooter()
-    if self.ui and self.ui.view and self.ui.view.footer and self.ui.view.footer.onToggleFooterMode then
-        self.ui.view.footer:onToggleFooterMode()
-        self.ui.view.footer_visible = not self.ui.view.footer_visible
+function StatusBarDisabler:getFooter()
+    return self.ui and self.ui.view and self.ui.view.footer or nil
+end
+
+function StatusBarDisabler:getCurrentFooterMode()
+    local footer = self:getFooter()
+    return footer and footer.mode or nil
+end
+
+function StatusBarDisabler:applyFooterMode(mode)
+    local footer = self:getFooter()
+    if not footer or not footer.applyFooterMode then
+        return false
     end
+
+    footer:applyFooterMode(mode)
+    if footer.onUpdateFooter then
+        footer:onUpdateFooter(true)
+    end
+    return true
 end
 
 function StatusBarDisabler:applyPathPolicy(file_path)
@@ -102,16 +132,25 @@ function StatusBarDisabler:applyPathPolicy(file_path)
 
     if self:pathMatches(file_path) then
         if self:isFooterVisible() then
-            self:toggleFooter()
-            self.state.hidden_by_plugin = true
+            local current_mode = self:getCurrentFooterMode()
+            if current_mode and current_mode ~= 0 and self:applyFooterMode(0) then
+                self.state.previous_footer_mode = current_mode
+                self.state.hidden_by_plugin = true
+                self:persistRuntimeState()
+            end
         end
         return
     end
 
     if self.state.hidden_by_plugin and not self:isFooterVisible() then
-        self:toggleFooter()
+        local restore_mode = self.state.previous_footer_mode
+        if restore_mode and restore_mode ~= 0 then
+            self:applyFooterMode(restore_mode)
+        end
     end
     self.state.hidden_by_plugin = false
+    self.state.previous_footer_mode = nil
+    self:persistRuntimeState()
 end
 
 function StatusBarDisabler:onReaderReady()
