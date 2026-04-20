@@ -18,6 +18,20 @@ local function trim(text)
     return text:gsub("^%s+", ""):gsub("%s+$", "")
 end
 
+function StatusBarDisabler:findPathFragment(fragment, skip_index)
+    if type(fragment) ~= "string" or fragment == "" then
+        return nil
+    end
+
+    for index, existing in ipairs(self.settings.path_fragments or {}) do
+        if index ~= skip_index and existing == fragment then
+            return index
+        end
+    end
+
+    return nil
+end
+
 function StatusBarDisabler:normalizeSettings(settings)
     settings = settings or {}
     if settings.enabled == nil then
@@ -25,11 +39,13 @@ function StatusBarDisabler:normalizeSettings(settings)
     end
 
     local fragments = {}
+    local seen = {}
     if type(settings.path_fragments) == "table" then
         for _, fragment in ipairs(settings.path_fragments) do
             if type(fragment) == "string" then
                 local cleaned = trim(fragment)
-                if cleaned ~= "" then
+                if cleaned ~= "" and not seen[cleaned] then
+                    seen[cleaned] = true
                     table.insert(fragments, cleaned)
                 end
             end
@@ -107,7 +123,7 @@ function StatusBarDisabler:addPathFragment(fragment)
         return false
     end
     local cleaned = trim(fragment)
-    if cleaned == "" then
+    if cleaned == "" or self:findPathFragment(cleaned) then
         return false
     end
 
@@ -121,7 +137,7 @@ function StatusBarDisabler:updatePathFragment(index, fragment)
         return false
     end
     local cleaned = trim(fragment)
-    if cleaned == "" then
+    if cleaned == "" or self:findPathFragment(cleaned, index) then
         return false
     end
 
@@ -148,8 +164,10 @@ end
 
 function StatusBarDisabler:showPathEditor(title, initial_value, on_save)
     local dialog
+    local handled = false
     local function closeDialog()
-        if dialog then
+        if not handled and dialog then
+            handled = true
             UIManager:close(dialog)
         end
     end
@@ -168,10 +186,13 @@ function StatusBarDisabler:showPathEditor(title, initial_value, on_save)
             {
                 text = _("Save"),
                 callback = function()
+                    if handled then
+                        return
+                    end
                     if on_save(dialog and dialog.getInputText and dialog:getInputText() or initial_value) then
                         closeDialog()
                     else
-                        self:showInfo(_("Path fragment cannot be empty."))
+                        self:showInfo(_("Path fragment must be non-empty and unique."))
                     end
                 end,
             },

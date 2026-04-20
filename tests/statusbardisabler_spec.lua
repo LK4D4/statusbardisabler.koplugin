@@ -225,7 +225,9 @@ add_dialog.getInputText = function()
     return "Manga"
 end
 add_dialog.buttons[1][2].callback()
+add_dialog.buttons[1][2].callback()
 
+assertEquals(#dialog_plugin.settings.path_fragments, 1, "save button should only add one fragment even if callback fires multiple times")
 assertEquals(dialog_plugin.settings.path_fragments[1], "Manga", "save button should add the entered path fragment")
 assertEquals(closed_widgets[#closed_widgets], add_dialog, "save button should close the input dialog through UIManager")
 
@@ -233,7 +235,20 @@ dialog_plugin:showAddPathDialog()
 local cancel_dialog = shown_widgets[#shown_widgets]
 assertTrue(cancel_dialog ~= nil, "cancel dialog should be shown")
 cancel_dialog.buttons[1][1].callback()
+cancel_dialog.buttons[1][1].callback()
 
 assertEquals(closed_widgets[#closed_widgets], cancel_dialog, "cancel button should close the input dialog through UIManager")
+
+local dedupe_plugin = newPlugin({
+    enabled = true,
+    path_fragments = { "Manga", "Manga", "Comics", "Manga", "Comics" },
+}, {
+    file = "/books/Novel/book.epub",
+    footer_visible = true,
+})
+
+assertEquals(#dedupe_plugin.settings.path_fragments, 2, "plugin should normalize duplicate saved fragments on init")
+assertEquals(dedupe_plugin.settings.path_fragments[1], "Manga", "dedupe should preserve the first fragment")
+assertEquals(dedupe_plugin.settings.path_fragments[2], "Comics", "dedupe should preserve order for unique fragments")
 
 print("statusbardisabler smoke tests passed")
