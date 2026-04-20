@@ -148,6 +148,12 @@ end
 
 function StatusBarDisabler:showPathEditor(title, initial_value, on_save)
     local dialog
+    local function closeDialog()
+        if dialog then
+            UIManager:close(dialog)
+        end
+    end
+
     dialog = InputDialog:new{
         title = title,
         input = initial_value,
@@ -156,18 +162,14 @@ function StatusBarDisabler:showPathEditor(title, initial_value, on_save)
                 text = _("Cancel"),
                 id = "close",
                 callback = function()
-                    if dialog and dialog.close then
-                        dialog:close()
-                    end
+                    closeDialog()
                 end,
             },
             {
                 text = _("Save"),
                 callback = function()
                     if on_save(dialog and dialog.getInputText and dialog:getInputText() or initial_value) then
-                        if dialog and dialog.close then
-                            dialog:close()
-                        end
+                        closeDialog()
                     else
                         self:showInfo(_("Path fragment cannot be empty."))
                     end

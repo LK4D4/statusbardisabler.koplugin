@@ -14,6 +14,7 @@ end
 
 local persisted_settings
 local shown_widgets = {}
+local closed_widgets = {}
 
 package.preload["gettext"] = function()
     return function(text)
@@ -37,6 +38,9 @@ package.preload["ui/uimanager"] = function()
     return {
         show = function(_, widget)
             table.insert(shown_widgets, widget)
+        end,
+        close = function(_, widget)
+            table.insert(closed_widgets, widget)
         end,
     }
 end
@@ -83,6 +87,8 @@ local StatusBarDisabler = dofile("main.lua")
 
 local function newPlugin(settings, state)
     persisted_settings = settings
+    shown_widgets = {}
+    closed_widgets = {}
 
     local footer = {
         toggle_calls = 0,
@@ -203,5 +209,31 @@ transition_plugin.ui.view.footer_visible = false
 transition_plugin:onReaderReady()
 
 assertEquals(transition_plugin.ui.view.footer.toggle_calls, 2, "moving from matching to non-matching books should restore footer once")
+
+local dialog_plugin = newPlugin({
+    enabled = true,
+    path_fragments = {},
+}, {
+    file = "/books/Novel/book.epub",
+    footer_visible = true,
+})
+
+dialog_plugin:showAddPathDialog()
+local add_dialog = shown_widgets[#shown_widgets]
+assertTrue(add_dialog ~= nil, "showAddPathDialog should show an input dialog")
+add_dialog.getInputText = function()
+    return "Manga"
+end
+add_dialog.buttons[1][2].callback()
+
+assertEquals(dialog_plugin.settings.path_fragments[1], "Manga", "save button should add the entered path fragment")
+assertEquals(closed_widgets[#closed_widgets], add_dialog, "save button should close the input dialog through UIManager")
+
+dialog_plugin:showAddPathDialog()
+local cancel_dialog = shown_widgets[#shown_widgets]
+assertTrue(cancel_dialog ~= nil, "cancel dialog should be shown")
+cancel_dialog.buttons[1][1].callback()
+
+assertEquals(closed_widgets[#closed_widgets], cancel_dialog, "cancel button should close the input dialog through UIManager")
 
 print("statusbardisabler smoke tests passed")
